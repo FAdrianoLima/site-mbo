@@ -1,0 +1,35 @@
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  included_files = ["netlify/functions/**"]
+  external_node_modules = ["firebase-admin", "basic-ftp"]
+
+[context.dev.environment]
+  VITE_USE_FIRESTORE_MOCK = "true"
+
+
+# ============================================================
+# SINCRONIZAÇÃO AUTOMÁTICA - A CADA 4 HORAS
+# Horários em UTC:
+# 03:00 = 00:00 Brasil
+# 07:00 = 04:00 Brasil
+# 11:00 = 08:00 Brasil
+# 15:00 = 12:00 Brasil
+# 19:00 = 16:00 Brasil
+# 23:00 = 20:00 Brasil
+# ============================================================
+
+[functions.syncClientes]
+  schedule = "0 3,7,11,15,19,23 * * *"
+
+[functions.syncPedidos]
+  schedule = "5 3,7,11,15,19,23 * * *"
+
+[functions.syncOPs]
+  schedule = "10 3,7,11,15,19,23 * * *"
+
+[functions.processarOps]
+  schedule = "15 3,7,11,15,19,23 * * *"
+
+[functions.enviarWhatsApp]
+  schedule = "20 3,7,11,15,19,23 * * *"

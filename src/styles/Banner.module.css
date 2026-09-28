@@ -1,0 +1,128 @@
+.background {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+
+  background-image: url("/static/images/fundo.jpg");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  overflow: hidden;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1;
+}
+
+.interno {
+  position: relative;
+  z-index: 2;
+
+  width: 100%;
+  max-width: 80rem;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  padding: 40px 20px;
+  box-sizing: border-box;
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+
+  color: #ffffff;
+  text-align: center;
+}
+
+.tag {
+  display: inline-block;
+
+  margin-bottom: 20px;
+  padding: 8px 18px;
+
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 30px;
+
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.box h1 {
+  margin: 0;
+
+  font-size: 100px;
+  line-height: 1;
+  font-weight: 700;
+
+  text-transform: uppercase;
+
+  text-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.box p {
+  margin: 25px 0 8px;
+
+  font-size: 28px;
+  line-height: 1.4;
+  font-weight: 400;
+
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.subtitulo {
+  font-size: 17px;
+  opacity: 0.9;
+}
+
+/* =========================================
+   MOBILE
+========================================= */
+
+@media only screen and (max-width: 926px) {
+  .background {
+    min-height: 70vh;
+  }
+
+  .interno {
+    padding: 30px 20px;
+  }
+
+  .tag {
+    margin-bottom: 15px;
+    padding: 7px 15px;
+
+    font-size: 11px;
+    letter-spacing: 2px;
+  }
+
+  .box h1 {
+    font-size: 60px;
+  }
+
+  .box p {
+    margin-top: 20px;
+
+    font-size: 20px;
+  }
+
+  .subtitulo {
+    font-size: 14px;
+  }
+}

@@ -1,0 +1,166 @@
+.background {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #000;
+}
+
+
+.interno {
+  width: 100%;
+  max-width: 80rem;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+
+.box {
+  width: 100%;
+  max-width: 19rem;
+  height: 100%;
+  height: 16.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  margin-bottom: 10rem;
+}
+
+.interno h2 {
+  font-size: 25px;
+  line-height: 35px;
+  color: #8d8d8d;
+  font-weight: 700;
+}
+
+.interno h3 {
+  color: #022042;
+  font-size: 28px;
+  line-height: 18px;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.interno p {
+  text-align: center;
+}
+
+.interno img {
+  width: 100%;
+  max-width: 19rem;
+  margin: 0.2rem 0rem;
+  width: 100%;
+  height: 16.5rem;
+  margin-top: -0.5px;
+  -moz-transition: all 0.5s;
+  -webkit-transition: all 0.5s;
+  transition: all 0.5s;
+}
+
+
+.interno img:hover {
+  -moz-transition: all 0.5s;
+  -webkit-transition: all 0.5s;
+  transition: all 0.5s;
+  opacity: 0.5;
+}
+
+.img {
+  width: 100%;
+  max-width: 19rem;
+  margin: 0.2rem 0rem;
+  width: 100%;
+  height: 16.4rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+  -moz-transition: all 0.5s;
+  -webkit-transition: all 0.5s;
+  transition: all 0.5s;
+  background-color: #db9600;
+  background-size: cover;
+  border-radius: 0px 18px 18px 18px;
+}
+
+.box h3 {
+  color: #db9600;
+  font-size: 24px;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.box p {
+  color: #1B1B1B;
+  font-size: 20px;
+  font-weight: 400;
+  margin-top: -10px;
+}
+
+.galeria1 {
+  width: 100%;
+  max-width: 19.5rem;
+  margin: 0.2rem 0rem;
+  width: 100%;
+  height: 15rem;
+  background-image: url(/static/images/quemsomos/fagner.png);
+  background-color: #000;
+  background-position: center;
+  background-size: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+.galeria1:hover {
+  box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.6);
+  -moz-transition: all 0.5s;
+  -webkit-transition: all 0.5s;
+  transition: all 0.5s;
+}
+
+
+/* @media Menu Mobile*/
+@media only screen and (max-width: 926px) {
+  .background {
+    width: 100%;
+    display: flex;
+    flex-direction: wrap;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+  }
+
+  .interno {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    margin-left: 1.5rem;
+    margin-right: 1.5rem;
+  }
+
+  .quadrado {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+    width: 10rem;
+    margin-left: 8rem;
+    margin-right: 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+}
