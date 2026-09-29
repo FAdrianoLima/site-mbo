@@ -12,7 +12,6 @@ const { FieldValue } = admin.firestore;
 
 function montarTelefone(ddd, telefone) {
   const dddLimpo = String(ddd || "").replace(/\D/g, "");
-
   const telefoneLimpo = String(telefone || "").replace(/\D/g, "");
 
   if (!dddLimpo || !telefoneLimpo) {
@@ -29,7 +28,7 @@ function montarTelefone(ddd, telefone) {
 }
 
 // ============================================================
-// MONTAR MENSAGEM
+// MONTAR MENSAGEM DO CLIENTE
 // ============================================================
 
 function montarMensagem(notificacao) {
@@ -98,9 +97,7 @@ Cliente: ${codigoCliente}
 
 async function enviarMensagemZApi(phone, message) {
   const instanceId = process.env.ZAPI_INSTANCE_ID;
-
   const token = process.env.ZAPI_TOKEN;
-
   const clientToken = process.env.ZAPI_CLIENT_TOKEN;
 
   if (!instanceId) {
@@ -121,23 +118,93 @@ async function enviarMensagemZApi(phone, message) {
 
   const response = await axios.post(
     url,
-
     {
       phone,
-
       message,
     },
-
     {
       headers: {
         "Content-Type": "application/json",
-
         "Client-Token": clientToken,
       },
     },
   );
 
   return response.data;
+}
+
+// ============================================================
+// RELATÓRIO ADMINISTRATIVO
+// ============================================================
+
+function montarRelatorioExecucao({
+  total,
+  enviadas,
+  erros,
+  semTelefone,
+  relatorios,
+}) {
+  const data = new Date();
+
+  const dataFormatada = data.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+  });
+
+  let mensagem = `📊 RELATÓRIO DE ENVIO — MBO
+
+🕐 Execução: ${dataFormatada}
+
+📦 Notificações encontradas: ${total}
+
+✅ Enviadas: ${enviadas}
+❌ Erros: ${erros}
+⚠️ Sem telefone: ${semTelefone}
+`;
+
+  if (relatorios.length === 0) {
+    mensagem += `
+
+ℹ️ Nenhuma notificação foi processada nesta execução.`;
+
+    return mensagem;
+  }
+
+  mensagem += `
+
+━━━━━━━━━━━━━━━━━━`;
+
+  for (const relatorio of relatorios) {
+    mensagem += `
+
+👤 Cliente: ${relatorio.clienteNome || "Não informado"}
+
+🔢 Código do cliente: ${relatorio.codigoCliente || "Não informado"}
+
+📱 Telefone: ${relatorio.telefone || "Não informado"}
+
+📌 Status: ${relatorio.status}`;
+
+    if (relatorio.mensagem) {
+      mensagem += `
+
+📨 MENSAGEM ENVIADA:
+
+${relatorio.mensagem}`;
+    }
+
+    if (relatorio.erro) {
+      mensagem += `
+
+❌ Erro:
+${relatorio.erro}`;
+    }
+
+    mensagem += `
+
+━━━━━━━━━━━━━━━━━━`;
+  }
+
+  return mensagem.trim();
 }
 
 // ============================================================
@@ -148,6 +215,10 @@ exports.handler = async () => {
   try {
     console.log("📱 Iniciando envio de WhatsApp...");
 
+    // ========================================================
+    // BUSCAR NOTIFICAÇÕES PENDENTES
+    // ========================================================
+
     const snapshot = await db
       .collection("notificacoesOP")
       .where("status", "==", "pendente")
@@ -156,41 +227,64 @@ exports.handler = async () => {
     console.log(`📦 Notificações pendentes: ${snapshot.size}`);
 
     let enviadas = 0;
-
     let erros = 0;
-
     let semTelefone = 0;
+
+    // Relatórios que serão enviados para o administrador
+    const relatorios = [];
+
+    // ========================================================
+    // PROCESSAR NOTIFICAÇÕES
+    // ========================================================
 
     for (const doc of snapshot.docs) {
       const notificacao = doc.data();
 
       const telefone = montarTelefone(notificacao.ddd, notificacao.telefone);
 
-      // ========================================================
+      // ======================================================
       // SEM TELEFONE
-      // ========================================================
+      // ======================================================
 
       if (!telefone) {
         console.log(
           `⚠️ Cliente ${notificacao.codigoCliente} sem telefone válido.`,
         );
 
+        const erro = "Cliente não possui telefone válido.";
+
         await doc.ref.update({
           status: "erro",
-
-          erro: "Cliente não possui telefone válido.",
-
+          erro,
           atualizadoEm: FieldValue.serverTimestamp(),
         });
 
         semTelefone++;
 
+        relatorios.push({
+          clienteNome:
+            notificacao.clienteNome ||
+            notificacao.clienteRazaoSocial ||
+            "Não informado",
+
+          codigoCliente:
+            notificacao.codigoCliente ||
+            notificacao.pessoaId ||
+            "Não informado",
+
+          telefone: notificacao.telefone || "Não informado",
+
+          status: "❌ ERRO",
+
+          erro,
+        });
+
         continue;
       }
 
-      // ========================================================
+      // ======================================================
       // MONTAR MENSAGEM
-      // ========================================================
+      // ======================================================
 
       const mensagem = montarMensagem(notificacao);
 
@@ -201,15 +295,19 @@ exports.handler = async () => {
       console.log(`📦 Quantidade de itens: ${notificacao.quantidadeItens}`);
 
       try {
+        // ====================================================
+        // ENVIAR PARA CLIENTE
+        // ====================================================
+
         const resultado = await enviarMensagemZApi(telefone, mensagem);
 
         console.log(
           `✅ WhatsApp enviado para cliente ${notificacao.codigoCliente}.`,
         );
 
-        // ======================================================
+        // ====================================================
         // MARCAR COMO ENVIADO
-        // ======================================================
+        // ====================================================
 
         await doc.ref.update({
           status: "enviado",
@@ -226,27 +324,115 @@ exports.handler = async () => {
         });
 
         enviadas++;
+
+        // ====================================================
+        // ADICIONAR AO RELATÓRIO
+        // ====================================================
+
+        relatorios.push({
+          clienteNome:
+            notificacao.clienteNome ||
+            notificacao.clienteRazaoSocial ||
+            "Não informado",
+
+          codigoCliente:
+            notificacao.codigoCliente ||
+            notificacao.pessoaId ||
+            "Não informado",
+
+          telefone,
+
+          status: "✅ ENVIADO",
+
+          mensagem,
+        });
       } catch (error) {
+        const erro =
+          error.response?.data ||
+          error.message ||
+          "Erro desconhecido ao enviar WhatsApp.";
+
         console.error(
           `❌ Erro ao enviar WhatsApp para cliente ${notificacao.codigoCliente}:`,
-
-          error.response?.data || error.message,
+          erro,
         );
+
+        // ====================================================
+        // MARCAR COMO ERRO
+        // ====================================================
 
         await doc.ref.update({
           status: "erro",
 
-          erro:
-            error.response?.data ||
-            error.message ||
-            "Erro desconhecido ao enviar WhatsApp.",
+          erro,
 
           atualizadoEm: FieldValue.serverTimestamp(),
         });
 
         erros++;
+
+        // ====================================================
+        // ADICIONAR AO RELATÓRIO
+        // ====================================================
+
+        relatorios.push({
+          clienteNome:
+            notificacao.clienteNome ||
+            notificacao.clienteRazaoSocial ||
+            "Não informado",
+
+          codigoCliente:
+            notificacao.codigoCliente ||
+            notificacao.pessoaId ||
+            "Não informado",
+
+          telefone,
+
+          status: "❌ ERRO",
+
+          mensagem,
+
+          erro: typeof erro === "string" ? erro : JSON.stringify(erro),
+        });
       }
     }
+
+    // ========================================================
+    // RELATÓRIO ADMINISTRATIVO
+    // ========================================================
+
+    const telefoneAdmin = process.env.ZAPI_ADMIN_PHONE;
+
+    if (!telefoneAdmin) {
+      console.warn(
+        "⚠️ ZAPI_ADMIN_PHONE não configurada. Relatório não será enviado.",
+      );
+    } else {
+      try {
+        const relatorio = montarRelatorioExecucao({
+          total: snapshot.size,
+          enviadas,
+          erros,
+          semTelefone,
+          relatorios,
+        });
+
+        console.log("📊 Enviando relatório administrativo...");
+
+        await enviarMensagemZApi(telefoneAdmin, relatorio);
+
+        console.log("✅ Relatório administrativo enviado.");
+      } catch (error) {
+        console.error(
+          "❌ Erro ao enviar relatório administrativo:",
+          error.response?.data || error.message,
+        );
+      }
+    }
+
+    // ========================================================
+    // FINALIZAÇÃO
+    // ========================================================
 
     console.log("✅ Processamento de WhatsApp finalizado.");
 
@@ -267,6 +453,8 @@ exports.handler = async () => {
         erros,
 
         semTelefone,
+
+        relatorioEnviado: Boolean(telefoneAdmin),
       }),
     };
   } catch (error) {
