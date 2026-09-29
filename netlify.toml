@@ -28,7 +28,7 @@
 [functions.syncOPs]
   schedule = "10 3,7,11,15,19,23 * * *"
 
-[functions.processarOps]
+[functions.processarOPs]
   schedule = "15 3,7,11,15,19,23 * * *"
 
 [functions.enviarWhatsApp]
