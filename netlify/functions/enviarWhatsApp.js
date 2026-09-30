@@ -10,9 +10,14 @@ const { FieldValue } = admin.firestore;
 // TELEFONE
 // ============================================================
 
+function limparTelefone(valor) {
+  return String(valor || "").replace(/\D/g, "");
+}
+
+// Monta telefone do cliente usando DDD + telefone
 function montarTelefone(ddd, telefone) {
-  const dddLimpo = String(ddd || "").replace(/\D/g, "");
-  const telefoneLimpo = String(telefone || "").replace(/\D/g, "");
+  const dddLimpo = limparTelefone(ddd);
+  const telefoneLimpo = limparTelefone(telefone);
 
   if (!dddLimpo || !telefoneLimpo) {
     return null;
@@ -27,6 +32,31 @@ function montarTelefone(ddd, telefone) {
   return numero;
 }
 
+// Normaliza um telefone que já pode estar completo
+function normalizarTelefoneCompleto(telefone) {
+  let numero = limparTelefone(telefone);
+
+  if (!numero) {
+    return null;
+  }
+
+  // Já está com código do Brasil
+  if (numero.startsWith("55")) {
+    if (numero.length !== 12 && numero.length !== 13) {
+      return null;
+    }
+
+    return numero;
+  }
+
+  // Número brasileiro sem 55
+  if (numero.length === 10 || numero.length === 11) {
+    return `55${numero}`;
+  }
+
+  return null;
+}
+
 // ============================================================
 // MONTAR MENSAGEM DO CLIENTE
 // ============================================================
@@ -35,18 +65,7 @@ function montarMensagem(notificacao) {
   const nome =
     notificacao.clienteNome || notificacao.clienteRazaoSocial || "cliente";
 
-  const codigoCliente =
-    notificacao.codigoCliente || notificacao.pessoaId || "não informado";
-
   const itens = Array.isArray(notificacao.itens) ? notificacao.itens : [];
-
-  let mensagem = `Olá, ${nome}!
-
-Temos atualizações nas suas ordens de produção.
-
-Cliente: ${codigoCliente}
-
-`;
 
   // ==========================================================
   // AGRUPAR POR PEDIDO
@@ -57,36 +76,37 @@ Cliente: ${codigoCliente}
   for (const item of itens) {
     const codigoPedido = item.codigoPedido || item.pedidoId || "não informado";
 
-    if (!pedidos.has(String(codigoPedido))) {
-      pedidos.set(String(codigoPedido), []);
+    const chave = String(codigoPedido);
+
+    if (!pedidos.has(chave)) {
+      pedidos.set(chave, []);
     }
 
-    pedidos.get(String(codigoPedido)).push(item);
+    pedidos.get(chave).push(item);
   }
 
   // ==========================================================
-  // MONTAR PEDIDOS E OPs
+  // MONTAR MENSAGEM
   // ==========================================================
 
-  for (const [codigoPedido, ops] of pedidos.entries()) {
-    mensagem += `Pedido: ${codigoPedido}\n`;
+  let mensagem = `Olá, ${nome}!
 
-    for (const op of ops) {
-      mensagem += `OP: ${op.opId}`;
+Temos uma atualização sobre o seu pedido.
 
-      if (op.opSeq != null) {
-        mensagem += `-${op.opSeq}`;
-      }
+`;
 
-      mensagem += `\n`;
+  for (const [codigoPedido] of pedidos.entries()) {
+    mensagem += `Pedido: ${codigoPedido}
 
-      mensagem += `Etapa: ${op.etapaAtual || "não informada"}\n`;
+Seu pedido está em nosso processo de produção.
 
-      mensagem += `\n`;
-    }
+`;
   }
 
-  mensagem += "Se precisar de mais informações, estamos à disposição.";
+  mensagem += `Esta é uma mensagem automática.
+
+Em caso de dúvidas, entre em contato pelo número:
++55 54 9627-0768`;
 
   return mensagem.trim();
 }
@@ -116,6 +136,8 @@ async function enviarMensagemZApi(phone, message) {
     `https://api.z-api.io/instances/${instanceId}` +
     `/token/${token}/send-text`;
 
+  console.log(`📱 Z-API → ${phone}`);
+
   const response = await axios.post(
     url,
     {
@@ -127,10 +149,32 @@ async function enviarMensagemZApi(phone, message) {
         "Content-Type": "application/json",
         "Client-Token": clientToken,
       },
+      timeout: 15000,
     },
   );
 
-  return response.data;
+  console.log("📨 Resposta Z-API:", JSON.stringify(response.data));
+
+  // A Z-API normalmente retorna um identificador
+  // quando a mensagem foi aceita.
+  const messageId =
+    response.data?.messageId ||
+    response.data?.id ||
+    response.data?.zaapId ||
+    null;
+
+  if (!messageId) {
+    throw new Error(
+      `Z-API não retornou identificador de mensagem. Resposta: ${JSON.stringify(
+        response.data,
+      )}`,
+    );
+  }
+
+  return {
+    ...response.data,
+    messageId,
+  };
 }
 
 // ============================================================
@@ -176,18 +220,29 @@ function montarRelatorioExecucao({
   for (const relatorio of relatorios) {
     mensagem += `
 
-👤 Cliente: ${relatorio.clienteNome || "Não informado"}
+👤 Cliente:
+${relatorio.clienteNome || "Não informado"}
 
-🔢 Código do cliente: ${relatorio.codigoCliente || "Não informado"}
+🔢 Código:
+${relatorio.codigoCliente || "Não informado"}
 
-📱 Telefone: ${relatorio.telefone || "Não informado"}
+📱 Telefone:
+${relatorio.telefone || "Não informado"}
 
-📌 Status: ${relatorio.status}`;
+📌 Status:
+${relatorio.status}`;
+
+    if (relatorio.messageId) {
+      mensagem += `
+
+🆔 ID Z-API:
+${relatorio.messageId}`;
+    }
 
     if (relatorio.mensagem) {
       mensagem += `
 
-📨 MENSAGEM ENVIADA:
+📨 Mensagem enviada:
 
 ${relatorio.mensagem}`;
     }
@@ -196,6 +251,7 @@ ${relatorio.mensagem}`;
       mensagem += `
 
 ❌ Erro:
+
 ${relatorio.erro}`;
     }
 
@@ -230,7 +286,6 @@ exports.handler = async () => {
     let erros = 0;
     let semTelefone = 0;
 
-    // Relatórios que serão enviados para o administrador
     const relatorios = [];
 
     // ========================================================
@@ -292,7 +347,11 @@ exports.handler = async () => {
         `📤 Enviando WhatsApp para cliente ${notificacao.codigoCliente}...`,
       );
 
-      console.log(`📦 Quantidade de itens: ${notificacao.quantidadeItens}`);
+      console.log(`📱 Número: ${telefone}`);
+
+      console.log(
+        `📦 Quantidade de itens: ${notificacao.quantidadeItens || 0}`,
+      );
 
       try {
         // ====================================================
@@ -302,8 +361,10 @@ exports.handler = async () => {
         const resultado = await enviarMensagemZApi(telefone, mensagem);
 
         console.log(
-          `✅ WhatsApp enviado para cliente ${notificacao.codigoCliente}.`,
+          `✅ Z-API aceitou mensagem do cliente ${notificacao.codigoCliente}.`,
         );
+
+        console.log(`🆔 Message ID: ${resultado.messageId}`);
 
         // ====================================================
         // MARCAR COMO ENVIADO
@@ -318,10 +379,14 @@ exports.handler = async () => {
 
           quantidadeItens: notificacao.quantidadeItens || 0,
 
-          zapiMessageId: resultado?.messageId || resultado?.id || null,
+          zapiMessageId: resultado.messageId,
 
           atualizadoEm: FieldValue.serverTimestamp(),
         });
+
+        console.log(
+          `💾 Notificação ${doc.id} marcada como ENVIADO no Firestore.`,
+        );
 
         enviadas++;
 
@@ -344,6 +409,8 @@ exports.handler = async () => {
 
           status: "✅ ENVIADO",
 
+          messageId: resultado.messageId,
+
           mensagem,
         });
       } catch (error) {
@@ -352,9 +419,12 @@ exports.handler = async () => {
           error.message ||
           "Erro desconhecido ao enviar WhatsApp.";
 
+        const erroTexto =
+          typeof erro === "string" ? erro : JSON.stringify(erro);
+
         console.error(
           `❌ Erro ao enviar WhatsApp para cliente ${notificacao.codigoCliente}:`,
-          erro,
+          erroTexto,
         );
 
         // ====================================================
@@ -364,7 +434,7 @@ exports.handler = async () => {
         await doc.ref.update({
           status: "erro",
 
-          erro,
+          erro: erroTexto,
 
           atualizadoEm: FieldValue.serverTimestamp(),
         });
@@ -392,7 +462,7 @@ exports.handler = async () => {
 
           mensagem,
 
-          erro: typeof erro === "string" ? erro : JSON.stringify(erro),
+          erro: erroTexto,
         });
       }
     }
@@ -401,12 +471,12 @@ exports.handler = async () => {
     // RELATÓRIO ADMINISTRATIVO
     // ========================================================
 
-    const telefoneAdmin = process.env.ZAPI_ADMIN_PHONE;
+    const telefoneAdmin = normalizarTelefoneCompleto(
+      process.env.ZAPI_ADMIN_PHONE,
+    );
 
     if (!telefoneAdmin) {
-      console.warn(
-        "⚠️ ZAPI_ADMIN_PHONE não configurada. Relatório não será enviado.",
-      );
+      console.warn("⚠️ ZAPI_ADMIN_PHONE não configurada ou inválida.");
     } else {
       try {
         const relatorio = montarRelatorioExecucao({
@@ -419,12 +489,20 @@ exports.handler = async () => {
 
         console.log("📊 Enviando relatório administrativo...");
 
-        await enviarMensagemZApi(telefoneAdmin, relatorio);
+        console.log(`📱 Número administrativo: ${telefoneAdmin}`);
+
+        const resultadoAdmin = await enviarMensagemZApi(
+          telefoneAdmin,
+          relatorio,
+        );
 
         console.log("✅ Relatório administrativo enviado.");
+
+        console.log(`🆔 ID relatório Z-API: ${resultadoAdmin.messageId}`);
       } catch (error) {
         console.error(
           "❌ Erro ao enviar relatório administrativo:",
+
           error.response?.data || error.message,
         );
       }
@@ -435,6 +513,10 @@ exports.handler = async () => {
     // ========================================================
 
     console.log("✅ Processamento de WhatsApp finalizado.");
+
+    console.log(
+      `📊 Resultado: ${enviadas} enviadas | ${erros} erros | ${semTelefone} sem telefone`,
+    );
 
     return {
       statusCode: 200,

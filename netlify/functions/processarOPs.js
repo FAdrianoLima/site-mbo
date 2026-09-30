@@ -2,6 +2,118 @@ const admin = require("./firebaseAdmin");
 
 const db = admin.firestore();
 
+// ============================================================
+// IDENTIFICAR MACROSTATUS
+// ============================================================
+
+function identificarMacroStatus(etapa) {
+  const texto = String(etapa || "")
+    .trim()
+    .toUpperCase();
+
+  if (!texto) {
+    return null;
+  }
+
+  // ----------------------------------------------------------
+  // PRODUÇÃO
+  // ----------------------------------------------------------
+  //
+  // Tudo que não for uma etapa de expedição,
+  // entrega ou logística será considerado PRODUÇÃO.
+  //
+  // Exemplos:
+  // TORNO
+  // FRESA
+  // SOLDA
+  // MATERIAL RECEBIDO/SEPARADO
+  // ACABAMENTO
+  // etc.
+  //
+  // ----------------------------------------------------------
+
+  const etapasForaDaProducao = [
+    "EXPEDIÇÃO",
+    "EXPEDICAO",
+
+    "DISPONÍVEL P/ENTREGA",
+    "DISPONIVEL P/ENTREGA",
+
+    "LOGÍSTICA",
+    "LOGISTICA",
+
+    "ENTREGUE",
+  ];
+
+  if (!etapasForaDaProducao.includes(texto)) {
+    return "producao";
+  }
+
+  // ----------------------------------------------------------
+  // EXPEDIÇÃO
+  // ----------------------------------------------------------
+
+  if (texto === "EXPEDIÇÃO" || texto === "EXPEDICAO") {
+    return "expedicao";
+  }
+
+  // ----------------------------------------------------------
+  // DISPONÍVEL PARA ENTREGA
+  // ----------------------------------------------------------
+
+  if (texto === "DISPONÍVEL P/ENTREGA" || texto === "DISPONIVEL P/ENTREGA") {
+    return "disponivel_entrega";
+  }
+
+  // ----------------------------------------------------------
+  // LOGÍSTICA
+  // ----------------------------------------------------------
+
+  if (texto === "LOGÍSTICA" || texto === "LOGISTICA") {
+    return "logistica";
+  }
+
+  // ----------------------------------------------------------
+  // ENTREGUE
+  // ----------------------------------------------------------
+
+  if (texto === "ENTREGUE") {
+    return "entregue";
+  }
+
+  return null;
+}
+
+// ============================================================
+// TEXTO DA MENSAGEM
+// ============================================================
+
+function textoMacroStatus(macroStatus) {
+  switch (macroStatus) {
+    case "producao":
+      return "Seu pedido entrou em nosso processo de produção.";
+
+    case "expedicao":
+      return "Seu pedido está em processo de expedição.";
+
+    case "disponivel_entrega":
+      return "Seu pedido está disponível para entrega.";
+
+    case "logistica":
+      return "Seu pedido está em processo de logística.";
+
+    case "entregue":
+      return "Seu pedido foi entregue.";
+
+    default:
+      return "Seu pedido teve uma atualização.";
+  }
+}
+
+// ============================================================
+// HANDLER
+// ============================================================
+
 exports.handler = async () => {
   try {
     console.log("🔄 Iniciando processamento das OPs...");
@@ -12,26 +124,37 @@ exports.handler = async () => {
 
     let verificadas = 0;
     let comMudanca = 0;
+
+    let ignoradasProducao = 0;
+    let fasesNovas = 0;
+    let fasesJaNotificadas = 0;
+
     let semPedido = 0;
     let semCliente = 0;
 
     const alteracoes = [];
 
-    // ============================================================
-    // 1. ENCONTRAR OPs QUE TIVERAM MUDANÇA DE ETAPA
-    // ============================================================
+    // ========================================================
+    // 1. ENCONTRAR OPs COM MUDANÇA
+    // ========================================================
 
     for (const doc of snapshot.docs) {
       verificadas++;
 
       const op = doc.data();
 
+      // ------------------------------------------------------
       // Primeira sincronização da OP
+      // ------------------------------------------------------
+
       if (!op.etapaAnterior) {
         continue;
       }
 
-      // Não houve mudança de etapa
+      // ------------------------------------------------------
+      // Não houve mudança
+      // ------------------------------------------------------
+
       if (op.etapaAnterior === op.etapaAtual) {
         continue;
       }
@@ -40,13 +163,51 @@ exports.handler = async () => {
 
       console.log(`🔄 OP ${op.opId}: ${op.etapaAnterior} → ${op.etapaAtual}`);
 
-      // ==========================================================
-      // 2. BUSCAR PEDIDO
-      // ==========================================================
+      // ======================================================
+      // IDENTIFICAR FASE ATUAL
+      // ======================================================
+
+      const macroStatus = identificarMacroStatus(op.etapaAtual);
+
+      if (!macroStatus) {
+        console.log(
+          `ℹ️ OP ${op.opId}: etapa "${op.etapaAtual}" não gera notificação.`,
+        );
+
+        ignoradasProducao++;
+
+        continue;
+      }
+
+      console.log(`📌 OP ${op.opId}: macrostatus = ${macroStatus}`);
+
+      // ======================================================
+      // VERIFICAR SE ESSA FASE JÁ FOI NOTIFICADA
+      // ======================================================
+
+      const fasesNotificadas = op.fasesNotificadas || {};
+
+      if (fasesNotificadas[macroStatus]) {
+        console.log(
+          `ℹ️ OP ${op.opId}: fase "${macroStatus}" já foi notificada.`,
+        );
+
+        fasesJaNotificadas++;
+
+        continue;
+      }
+
+      fasesNovas++;
+
+      // ======================================================
+      // BUSCAR PEDIDO
+      // ======================================================
 
       if (!op.pedidoId) {
         console.log(`⚠️ OP ${op.opId} não possui pedido.`);
+
         semPedido++;
+
         continue;
       }
 
@@ -57,20 +218,23 @@ exports.handler = async () => {
 
       if (!pedidoSnapshot.exists) {
         console.log(`⚠️ Pedido ${op.pedidoId} não encontrado.`);
+
         semPedido++;
+
         continue;
       }
 
       const pedido = pedidoSnapshot.data();
 
-      // ==========================================================
-      // 3. BUSCAR CLIENTE
-      // ==========================================================
+      // ======================================================
+      // BUSCAR CLIENTE
+      // ======================================================
 
       if (!pedido.pessoaId) {
         console.log(`⚠️ Pedido ${op.pedidoId} não possui pessoaId.`);
 
         semCliente++;
+
         continue;
       }
 
@@ -83,32 +247,31 @@ exports.handler = async () => {
         console.log(`⚠️ Cliente ${pedido.pessoaId} não encontrado.`);
 
         semCliente++;
+
         continue;
       }
 
       const cliente = clienteSnapshot.data();
 
-      // ==========================================================
-      // 4. DEFINIR CÓDIGO DO CLIENTE
-      //
-      // Atualmente o syncClientes salva o PessoaID como
-      // cosmosPessoaId. Portanto esse será o código do cliente.
-      // ==========================================================
+      // ======================================================
+      // CÓDIGO DO CLIENTE
+      // ======================================================
 
       const codigoCliente = cliente.cosmosPessoaId || pedido.pessoaId;
 
-      // ==========================================================
-      // 5. DEFINIR CÓDIGO DO PEDIDO
-      //
-      // Primeiro tenta o número da solicitação.
-      // Se não existir, usa o PedidoId do Cosmos.
-      // ==========================================================
+      // ======================================================
+      // CÓDIGO DO PEDIDO
+      // ======================================================
 
       const codigoPedido =
         pedido.numeroSolicitacao ||
         pedido.cosmosPedidoId ||
         pedido.pedidoId ||
         op.pedidoId;
+
+      // ======================================================
+      // ADICIONAR ALTERAÇÃO
+      // ======================================================
 
       alteracoes.push({
         opDocId: doc.id,
@@ -144,14 +307,22 @@ exports.handler = async () => {
         dataEtapaAtual: op.dataEtapaAtual,
 
         ultimoLancamentoId: op.ultimoLancamentoId,
+
+        macroStatus,
+
+        textoStatus: textoMacroStatus(macroStatus),
       });
     }
 
-    console.log(`📋 Alterações de OP encontradas: ${alteracoes.length}`);
+    console.log(`📋 Alterações que gerarão notificações: ${alteracoes.length}`);
 
-    // ============================================================
-    // 6. AGRUPAR TODAS AS ALTERAÇÕES POR CLIENTE
-    // ============================================================
+    console.log(`🏭 Novas fases de produção/status: ${fasesNovas}`);
+
+    console.log(`ℹ️ Fases já notificadas: ${fasesJaNotificadas}`);
+
+    // ========================================================
+    // 2. AGRUPAR POR CLIENTE
+    // ========================================================
 
     const gruposClientes = new Map();
 
@@ -185,39 +356,40 @@ exports.handler = async () => {
       `👥 Clientes que receberão notificações: ${gruposClientes.size}`,
     );
 
-    // ============================================================
-    // 7. CRIAR UMA NOTIFICAÇÃO POR CLIENTE
-    // ============================================================
+    // ========================================================
+    // 3. CRIAR NOTIFICAÇÕES
+    // ========================================================
 
     let notificacoesCriadas = 0;
     let notificacoesExistentes = 0;
 
     let batch = db.batch();
+
     let operacoesNoBatch = 0;
 
     const enviarBatch = async () => {
-      if (operacoesNoBatch === 0) return;
+      if (operacoesNoBatch === 0) {
+        return;
+      }
 
       await batch.commit();
 
       console.log(`💾 Batch gravado com ${operacoesNoBatch} operação(ões).`);
 
       batch = db.batch();
+
       operacoesNoBatch = 0;
     };
 
     for (const [pessoaId, grupo] of gruposClientes.entries()) {
-      // ==========================================================
-      // CRIAR ID ÚNICO DA NOTIFICAÇÃO
-      //
-      // Cada alteração de OP entra no identificador.
-      // Assim evitamos criar novamente a mesma notificação.
-      // ==========================================================
+      // ======================================================
+      // ID DA NOTIFICAÇÃO
+      // ======================================================
 
       const identificadores = grupo.itens
         .map(
           (item) =>
-            `${item.empresaId}_${item.opId}_${item.opSeq}_${item.ultimoLancamentoId}`,
+            `${item.empresaId}_${item.opId}_${item.opSeq}_${item.ultimoLancamentoId}_${item.macroStatus}`,
         )
         .sort();
 
@@ -235,9 +407,9 @@ exports.handler = async () => {
         continue;
       }
 
-      // ==========================================================
-      // CRIAR NOTIFICAÇÃO AGRUPADA
-      // ==========================================================
+      // ======================================================
+      // CRIAR NOTIFICAÇÃO
+      // ======================================================
 
       batch.set(notificacaoRef, {
         pessoaId,
@@ -274,6 +446,10 @@ exports.handler = async () => {
           dataEtapaAtual: item.dataEtapaAtual,
 
           ultimoLancamentoId: item.ultimoLancamentoId,
+
+          macroStatus: item.macroStatus,
+
+          textoStatus: item.textoStatus,
         })),
 
         status: "pendente",
@@ -286,8 +462,33 @@ exports.handler = async () => {
       });
 
       notificacoesCriadas++;
-
       operacoesNoBatch++;
+
+      // ======================================================
+      // ATUALIZAR FASE COMO NOTIFICADA
+      // ======================================================
+
+      for (const item of grupo.itens) {
+        const opRef = db.collection("opStatus").doc(item.opDocId);
+
+        const fasesNotificadas =
+          snapshot.docs.find((d) => d.id === item.opDocId)?.data()
+            ?.fasesNotificadas || {};
+
+        fasesNotificadas[item.macroStatus] = true;
+
+        batch.update(opRef, {
+          fasesNotificadas,
+
+          ultimaFaseNotificada: item.macroStatus,
+
+          ultimaNotificacaoEm: admin.firestore.FieldValue.serverTimestamp(),
+
+          atualizadoEm: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        operacoesNoBatch++;
+      }
 
       if (operacoesNoBatch >= 450) {
         await enviarBatch();
@@ -295,6 +496,10 @@ exports.handler = async () => {
     }
 
     await enviarBatch();
+
+    // ========================================================
+    // FINALIZAÇÃO
+    // ========================================================
 
     console.log("✅ Processamento das OPs finalizado.");
 
@@ -319,6 +524,12 @@ exports.handler = async () => {
         notificacoesCriadas,
 
         notificacoesExistentes,
+
+        fasesNovas,
+
+        fasesJaNotificadas,
+
+        ignoradasProducao,
 
         semPedido,
 
