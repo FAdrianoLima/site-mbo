@@ -2,86 +2,54 @@ const admin = require("./firebaseAdmin");
 
 const db = admin.firestore();
 
+const { FieldValue } = admin.firestore;
+
+// ============================================================
+// NORMALIZAR TEXTO
+// ============================================================
+
+function normalizarTexto(texto) {
+  return String(texto || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
 // ============================================================
 // IDENTIFICAR MACROSTATUS
 // ============================================================
 
 function identificarMacroStatus(etapa) {
-  const texto = String(etapa || "")
-    .trim()
-    .toUpperCase();
+  const texto = normalizarTexto(etapa);
 
   if (!texto) {
     return null;
   }
 
-  // ----------------------------------------------------------
-  // PRODUÇÃO
-  // ----------------------------------------------------------
-  //
-  // Tudo que não for uma etapa de expedição,
-  // entrega ou logística será considerado PRODUÇÃO.
-  //
-  // Exemplos:
-  // TORNO
-  // FRESA
-  // SOLDA
-  // MATERIAL RECEBIDO/SEPARADO
-  // ACABAMENTO
-  // etc.
-  //
-  // ----------------------------------------------------------
-
-  const etapasForaDaProducao = [
-    "EXPEDIÇÃO",
-    "EXPEDICAO",
-
-    "DISPONÍVEL P/ENTREGA",
-    "DISPONIVEL P/ENTREGA",
-
-    "LOGÍSTICA",
-    "LOGISTICA",
-
-    "ENTREGUE",
-  ];
-
-  if (!etapasForaDaProducao.includes(texto)) {
-    return "producao";
-  }
-
-  // ----------------------------------------------------------
-  // EXPEDIÇÃO
-  // ----------------------------------------------------------
-
-  if (texto === "EXPEDIÇÃO" || texto === "EXPEDICAO") {
-    return "expedicao";
-  }
-
-  // ----------------------------------------------------------
   // DISPONÍVEL PARA ENTREGA
-  // ----------------------------------------------------------
-
-  if (texto === "DISPONÍVEL P/ENTREGA" || texto === "DISPONIVEL P/ENTREGA") {
+  if (texto === "DISPONIVEL P/ENTREGA" || texto === "DISPONIVEL PARA ENTREGA") {
     return "disponivel_entrega";
   }
 
-  // ----------------------------------------------------------
-  // LOGÍSTICA
-  // ----------------------------------------------------------
+  // EXPEDIÇÃO
+  if (texto === "EXPEDICAO") {
+    return "expedicao";
+  }
 
-  if (texto === "LOGÍSTICA" || texto === "LOGISTICA") {
+  // LOGÍSTICA
+  if (texto === "LOGISTICA") {
     return "logistica";
   }
 
-  // ----------------------------------------------------------
   // ENTREGUE
-  // ----------------------------------------------------------
-
   if (texto === "ENTREGUE") {
     return "entregue";
   }
 
-  return null;
+  // Todo o restante é considerado PRODUÇÃO
+  return "producao";
 }
 
 // ============================================================
@@ -124,11 +92,9 @@ exports.handler = async () => {
 
     let verificadas = 0;
     let comMudanca = 0;
-
-    let ignoradasProducao = 0;
     let fasesNovas = 0;
     let fasesJaNotificadas = 0;
-
+    let notificacoesExistentes = 0;
     let semPedido = 0;
     let semCliente = 0;
 
@@ -143,18 +109,12 @@ exports.handler = async () => {
 
       const op = doc.data();
 
-      // ------------------------------------------------------
       // Primeira sincronização da OP
-      // ------------------------------------------------------
-
       if (!op.etapaAnterior) {
         continue;
       }
 
-      // ------------------------------------------------------
       // Não houve mudança
-      // ------------------------------------------------------
-
       if (op.etapaAnterior === op.etapaAtual) {
         continue;
       }
@@ -164,25 +124,19 @@ exports.handler = async () => {
       console.log(`🔄 OP ${op.opId}: ${op.etapaAnterior} → ${op.etapaAtual}`);
 
       // ======================================================
-      // IDENTIFICAR FASE ATUAL
+      // IDENTIFICAR MACROSTATUS
       // ======================================================
 
       const macroStatus = identificarMacroStatus(op.etapaAtual);
 
       if (!macroStatus) {
-        console.log(
-          `ℹ️ OP ${op.opId}: etapa "${op.etapaAtual}" não gera notificação.`,
-        );
-
-        ignoradasProducao++;
-
         continue;
       }
 
       console.log(`📌 OP ${op.opId}: macrostatus = ${macroStatus}`);
 
       // ======================================================
-      // VERIFICAR SE ESSA FASE JÁ FOI NOTIFICADA
+      // VERIFICAR SE A FASE JÁ FOI NOTIFICADA
       // ======================================================
 
       const fasesNotificadas = op.fasesNotificadas || {};
@@ -193,11 +147,8 @@ exports.handler = async () => {
         );
 
         fasesJaNotificadas++;
-
         continue;
       }
-
-      fasesNovas++;
 
       // ======================================================
       // BUSCAR PEDIDO
@@ -205,9 +156,7 @@ exports.handler = async () => {
 
       if (!op.pedidoId) {
         console.log(`⚠️ OP ${op.opId} não possui pedido.`);
-
         semPedido++;
-
         continue;
       }
 
@@ -220,7 +169,6 @@ exports.handler = async () => {
         console.log(`⚠️ Pedido ${op.pedidoId} não encontrado.`);
 
         semPedido++;
-
         continue;
       }
 
@@ -234,7 +182,6 @@ exports.handler = async () => {
         console.log(`⚠️ Pedido ${op.pedidoId} não possui pessoaId.`);
 
         semCliente++;
-
         continue;
       }
 
@@ -247,17 +194,10 @@ exports.handler = async () => {
         console.log(`⚠️ Cliente ${pedido.pessoaId} não encontrado.`);
 
         semCliente++;
-
         continue;
       }
 
       const cliente = clienteSnapshot.data();
-
-      // ======================================================
-      // CÓDIGO DO CLIENTE
-      // ======================================================
-
-      const codigoCliente = cliente.cosmosPessoaId || pedido.pessoaId;
 
       // ======================================================
       // CÓDIGO DO PEDIDO
@@ -277,16 +217,11 @@ exports.handler = async () => {
         opDocId: doc.id,
 
         empresaId: op.empresaId,
-
         opId: op.opId,
-
         opSeq: op.opSeq,
 
         pedidoId: op.pedidoId,
-
         pessoaId: pedido.pessoaId,
-
-        codigoCliente,
 
         codigoPedido,
 
@@ -295,28 +230,27 @@ exports.handler = async () => {
         clienteRazaoSocial: cliente.razaoSocial || "",
 
         ddd: cliente.ddd || "",
-
         telefone: cliente.telefone || "",
-
         email: cliente.email || "",
 
         etapaAnterior: op.etapaAnterior,
-
         etapaAtual: op.etapaAtual,
-
         dataEtapaAtual: op.dataEtapaAtual,
-
         ultimoLancamentoId: op.ultimoLancamentoId,
 
         macroStatus,
-
         textoStatus: textoMacroStatus(macroStatus),
+
+        // NOVO: previsão de entrega
+        dataEntrega: pedido.dataEntrega || null,
       });
+
+      fasesNovas++;
     }
 
-    console.log(`📋 Alterações que gerarão notificações: ${alteracoes.length}`);
+    console.log(`📋 Alterações encontradas: ${alteracoes.length}`);
 
-    console.log(`🏭 Novas fases de produção/status: ${fasesNovas}`);
+    console.log(`🆕 Novas fases: ${fasesNovas}`);
 
     console.log(`ℹ️ Fases já notificadas: ${fasesJaNotificadas}`);
 
@@ -333,16 +267,11 @@ exports.handler = async () => {
         gruposClientes.set(chaveCliente, {
           pessoaId: alteracao.pessoaId,
 
-          codigoCliente: alteracao.codigoCliente,
-
           clienteNome: alteracao.clienteNome,
-
           clienteRazaoSocial: alteracao.clienteRazaoSocial,
 
           ddd: alteracao.ddd,
-
           telefone: alteracao.telefone,
-
           email: alteracao.email,
 
           itens: [],
@@ -361,10 +290,8 @@ exports.handler = async () => {
     // ========================================================
 
     let notificacoesCriadas = 0;
-    let notificacoesExistentes = 0;
 
     let batch = db.batch();
-
     let operacoesNoBatch = 0;
 
     const enviarBatch = async () => {
@@ -377,13 +304,12 @@ exports.handler = async () => {
       console.log(`💾 Batch gravado com ${operacoesNoBatch} operação(ões).`);
 
       batch = db.batch();
-
       operacoesNoBatch = 0;
     };
 
     for (const [pessoaId, grupo] of gruposClientes.entries()) {
       // ======================================================
-      // ID DA NOTIFICAÇÃO
+      // ID ÚNICO DA NOTIFICAÇÃO
       // ======================================================
 
       const identificadores = grupo.itens
@@ -393,7 +319,7 @@ exports.handler = async () => {
         )
         .sort();
 
-      const notificacaoId = `${pessoaId}_` + identificadores.join("__");
+      const notificacaoId = `${pessoaId}_${identificadores.join("__")}`;
 
       const notificacaoRef = db.collection("notificacoesOP").doc(notificacaoId);
 
@@ -402,7 +328,7 @@ exports.handler = async () => {
       if (notificacaoSnapshot.exists) {
         notificacoesExistentes++;
 
-        console.log(`ℹ️ Notificação já existe para cliente ${pessoaId}.`);
+        console.log(`ℹ️ Notificação ${notificacaoId} já existe.`);
 
         continue;
       }
@@ -414,81 +340,56 @@ exports.handler = async () => {
       batch.set(notificacaoRef, {
         pessoaId,
 
-        codigoCliente: grupo.codigoCliente,
-
         clienteNome: grupo.clienteNome,
-
         clienteRazaoSocial: grupo.clienteRazaoSocial,
 
         ddd: grupo.ddd,
-
         telefone: grupo.telefone,
-
         email: grupo.email,
 
         quantidadeItens: grupo.itens.length,
 
         itens: grupo.itens.map((item) => ({
+          opDocId: item.opDocId,
+
           empresaId: item.empresaId,
-
           opId: item.opId,
-
           opSeq: item.opSeq,
 
           pedidoId: item.pedidoId,
-
           codigoPedido: item.codigoPedido,
 
           etapaAnterior: item.etapaAnterior,
-
           etapaAtual: item.etapaAtual,
 
           dataEtapaAtual: item.dataEtapaAtual,
-
           ultimoLancamentoId: item.ultimoLancamentoId,
 
           macroStatus: item.macroStatus,
-
           textoStatus: item.textoStatus,
+
+          // NOVO
+          dataEntrega: item.dataEntrega || null,
         })),
 
         status: "pendente",
 
-        criadoEm: admin.firestore.FieldValue.serverTimestamp(),
-
+        criadoEm: FieldValue.serverTimestamp(),
         enviadoEm: null,
-
-        atualizadoEm: admin.firestore.FieldValue.serverTimestamp(),
+        atualizadoEm: FieldValue.serverTimestamp(),
       });
 
       notificacoesCriadas++;
       operacoesNoBatch++;
 
-      // ======================================================
-      // ATUALIZAR FASE COMO NOTIFICADA
-      // ======================================================
-
-      for (const item of grupo.itens) {
-        const opRef = db.collection("opStatus").doc(item.opDocId);
-
-        const fasesNotificadas =
-          snapshot.docs.find((d) => d.id === item.opDocId)?.data()
-            ?.fasesNotificadas || {};
-
-        fasesNotificadas[item.macroStatus] = true;
-
-        batch.update(opRef, {
-          fasesNotificadas,
-
-          ultimaFaseNotificada: item.macroStatus,
-
-          ultimaNotificacaoEm: admin.firestore.FieldValue.serverTimestamp(),
-
-          atualizadoEm: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        operacoesNoBatch++;
-      }
+      // IMPORTANTE:
+      // NÃO marcamos mais a fase como notificada aqui.
+      //
+      // Ela só será marcada depois que o WhatsApp
+      // realmente for aceito pela Z-API.
+      //
+      // Isso evita perder uma fase quando houver erro
+      // de envio.
 
       if (operacoesNoBatch >= 450) {
         await enviarBatch();
@@ -514,7 +415,6 @@ exports.handler = async () => {
         sucesso: true,
 
         verificadas,
-
         comMudanca,
 
         alteracoesEncontradas: alteracoes.length,
@@ -522,17 +422,12 @@ exports.handler = async () => {
         clientesAgrupados: gruposClientes.size,
 
         notificacoesCriadas,
-
         notificacoesExistentes,
 
         fasesNovas,
-
         fasesJaNotificadas,
 
-        ignoradasProducao,
-
         semPedido,
-
         semCliente,
       }),
     };
@@ -548,7 +443,6 @@ exports.handler = async () => {
 
       body: JSON.stringify({
         sucesso: false,
-
         erro: error.message,
       }),
     };

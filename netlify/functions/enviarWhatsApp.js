@@ -14,7 +14,6 @@ function limparTelefone(valor) {
   return String(valor || "").replace(/\D/g, "");
 }
 
-// Monta telefone do cliente usando DDD + telefone
 function montarTelefone(ddd, telefone) {
   const dddLimpo = limparTelefone(ddd);
   const telefoneLimpo = limparTelefone(telefone);
@@ -32,7 +31,6 @@ function montarTelefone(ddd, telefone) {
   return numero;
 }
 
-// Normaliza um telefone que já pode estar completo
 function normalizarTelefoneCompleto(telefone) {
   let numero = limparTelefone(telefone);
 
@@ -40,7 +38,6 @@ function normalizarTelefoneCompleto(telefone) {
     return null;
   }
 
-  // Já está com código do Brasil
   if (numero.startsWith("55")) {
     if (numero.length !== 12 && numero.length !== 13) {
       return null;
@@ -49,12 +46,70 @@ function normalizarTelefoneCompleto(telefone) {
     return numero;
   }
 
-  // Número brasileiro sem 55
   if (numero.length === 10 || numero.length === 11) {
     return `55${numero}`;
   }
 
   return null;
+}
+
+// ============================================================
+// FORMATAR DATA
+// ============================================================
+
+function formatarDataEntrega(data) {
+  if (!data) {
+    return null;
+  }
+
+  const texto = String(data).trim();
+
+  // Exemplo:
+  // 2026-03-17T00:00:00
+  const match = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    return `${match[3]}/${match[2]}/${match[1]}`;
+  }
+
+  // Caso venha em outro formato
+  const dataObj = new Date(texto);
+
+  if (Number.isNaN(dataObj.getTime())) {
+    return null;
+  }
+
+  const dia = String(dataObj.getDate()).padStart(2, "0");
+  const mes = String(dataObj.getMonth() + 1).padStart(2, "0");
+  const ano = dataObj.getFullYear();
+
+  return `${dia}/${mes}/${ano}`;
+}
+
+// ============================================================
+// TEXTO DO STATUS
+// ============================================================
+
+function textoStatus(macroStatus) {
+  switch (macroStatus) {
+    case "producao":
+      return "Seu pedido entrou em nosso processo de produção.";
+
+    case "expedicao":
+      return "Seu pedido está em processo de expedição.";
+
+    case "disponivel_entrega":
+      return "Seu pedido está disponível para entrega.";
+
+    case "logistica":
+      return "Seu pedido está em processo de logística.";
+
+    case "entregue":
+      return "Seu pedido foi entregue.";
+
+    default:
+      return "Seu pedido teve uma atualização.";
+  }
 }
 
 // ============================================================
@@ -67,40 +122,28 @@ function montarMensagem(notificacao) {
 
   const itens = Array.isArray(notificacao.itens) ? notificacao.itens : [];
 
-  // ==========================================================
-  // AGRUPAR POR PEDIDO
-  // ==========================================================
-
-  const pedidos = new Map();
-
-  for (const item of itens) {
-    const codigoPedido = item.codigoPedido || item.pedidoId || "não informado";
-
-    const chave = String(codigoPedido);
-
-    if (!pedidos.has(chave)) {
-      pedidos.set(chave, []);
-    }
-
-    pedidos.get(chave).push(item);
-  }
-
-  // ==========================================================
-  // MONTAR MENSAGEM
-  // ==========================================================
-
   let mensagem = `Olá, ${nome}!
 
 Temos uma atualização sobre o seu pedido.
 
 `;
 
-  for (const [codigoPedido] of pedidos.entries()) {
+  for (const item of itens) {
+    const codigoPedido = item.codigoPedido || item.pedidoId || "não informado";
+
     mensagem += `Pedido: ${codigoPedido}
 
-Seu pedido está em nosso processo de produção.
+${textoStatus(item.macroStatus)}
 
 `;
+
+    const dataEntrega = formatarDataEntrega(item.dataEntrega);
+
+    if (dataEntrega) {
+      mensagem += `Previsão de entrega: ${dataEntrega}
+
+`;
+    }
   }
 
   mensagem += `Esta é uma mensagem automática.
@@ -149,14 +192,13 @@ async function enviarMensagemZApi(phone, message) {
         "Content-Type": "application/json",
         "Client-Token": clientToken,
       },
+
       timeout: 15000,
     },
   );
 
   console.log("📨 Resposta Z-API:", JSON.stringify(response.data));
 
-  // A Z-API normalmente retorna um identificador
-  // quando a mensagem foi aceita.
   const messageId =
     response.data?.messageId ||
     response.data?.id ||
@@ -175,6 +217,67 @@ async function enviarMensagemZApi(phone, message) {
     ...response.data,
     messageId,
   };
+}
+
+// ============================================================
+// MARCAR FASE COMO NOTIFICADA
+// ============================================================
+
+async function marcarFasesComoNotificadas(notificacao) {
+  const itens = Array.isArray(notificacao.itens) ? notificacao.itens : [];
+
+  const atualizacoes = new Map();
+
+  for (const item of itens) {
+    if (!item.opDocId || !item.macroStatus) {
+      continue;
+    }
+
+    if (!atualizacoes.has(item.opDocId)) {
+      atualizacoes.set(item.opDocId, new Set());
+    }
+
+    atualizacoes.get(item.opDocId).add(item.macroStatus);
+  }
+
+  for (const [opDocId, fases] of atualizacoes.entries()) {
+    const opRef = db.collection("opStatus").doc(opDocId);
+
+    const opSnapshot = await opRef.get();
+
+    if (!opSnapshot.exists) {
+      console.warn(`⚠️ OP ${opDocId} não encontrada ao marcar fase.`);
+
+      continue;
+    }
+
+    const op = opSnapshot.data();
+
+    const fasesNotificadas = {
+      ...(op.fasesNotificadas || {}),
+    };
+
+    let ultimaFase = null;
+
+    for (const fase of fases) {
+      fasesNotificadas[fase] = true;
+      ultimaFase = fase;
+    }
+
+    await opRef.update({
+      fasesNotificadas,
+
+      ultimaFaseNotificada: ultimaFase,
+
+      ultimaNotificacaoEm: FieldValue.serverTimestamp(),
+
+      atualizadoEm: FieldValue.serverTimestamp(),
+    });
+
+    console.log(
+      `💾 OP ${opDocId}: fases notificadas → ${Array.from(fases).join(", ")}`,
+    );
+  }
 }
 
 // ============================================================
@@ -201,20 +304,21 @@ function montarRelatorioExecucao({
 📦 Notificações encontradas: ${total}
 
 ✅ Enviadas: ${enviadas}
+
 ❌ Erros: ${erros}
+
 ⚠️ Sem telefone: ${semTelefone}
+
 `;
 
   if (relatorios.length === 0) {
     mensagem += `
-
 ℹ️ Nenhuma notificação foi processada nesta execução.`;
 
     return mensagem;
   }
 
   mensagem += `
-
 ━━━━━━━━━━━━━━━━━━`;
 
   for (const relatorio of relatorios) {
@@ -243,7 +347,6 @@ ${relatorio.messageId}`;
       mensagem += `
 
 📨 Mensagem enviada:
-
 ${relatorio.mensagem}`;
     }
 
@@ -251,7 +354,6 @@ ${relatorio.mensagem}`;
       mensagem += `
 
 ❌ Erro:
-
 ${relatorio.erro}`;
     }
 
@@ -270,10 +372,6 @@ ${relatorio.erro}`;
 exports.handler = async () => {
   try {
     console.log("📱 Iniciando envio de WhatsApp...");
-
-    // ========================================================
-    // BUSCAR NOTIFICAÇÕES PENDENTES
-    // ========================================================
 
     const snapshot = await db
       .collection("notificacoesOP")
@@ -302,9 +400,7 @@ exports.handler = async () => {
       // ======================================================
 
       if (!telefone) {
-        console.log(
-          `⚠️ Cliente ${notificacao.codigoCliente} sem telefone válido.`,
-        );
+        console.log(`⚠️ Cliente ${notificacao.pessoaId} sem telefone válido.`);
 
         const erro = "Cliente não possui telefone válido.";
 
@@ -322,10 +418,7 @@ exports.handler = async () => {
             notificacao.clienteRazaoSocial ||
             "Não informado",
 
-          codigoCliente:
-            notificacao.codigoCliente ||
-            notificacao.pessoaId ||
-            "Não informado",
+          codigoCliente: notificacao.pessoaId || "Não informado",
 
           telefone: notificacao.telefone || "Não informado",
 
@@ -344,7 +437,7 @@ exports.handler = async () => {
       const mensagem = montarMensagem(notificacao);
 
       console.log(
-        `📤 Enviando WhatsApp para cliente ${notificacao.codigoCliente}...`,
+        `📤 Enviando WhatsApp para cliente ${notificacao.pessoaId}...`,
       );
 
       console.log(`📱 Número: ${telefone}`);
@@ -361,13 +454,13 @@ exports.handler = async () => {
         const resultado = await enviarMensagemZApi(telefone, mensagem);
 
         console.log(
-          `✅ Z-API aceitou mensagem do cliente ${notificacao.codigoCliente}.`,
+          `✅ Z-API aceitou mensagem do cliente ${notificacao.pessoaId}.`,
         );
 
         console.log(`🆔 Message ID: ${resultado.messageId}`);
 
         // ====================================================
-        // MARCAR COMO ENVIADO
+        // MARCAR NOTIFICAÇÃO COMO ENVIADA
         // ====================================================
 
         await doc.ref.update({
@@ -384,14 +477,20 @@ exports.handler = async () => {
           atualizadoEm: FieldValue.serverTimestamp(),
         });
 
+        // ====================================================
+        // AGORA SIM MARCAR FASES
+        // ====================================================
+
+        await marcarFasesComoNotificadas(notificacao);
+
         console.log(
-          `💾 Notificação ${doc.id} marcada como ENVIADO no Firestore.`,
+          `💾 Fases da notificação ${doc.id} marcadas como enviadas.`,
         );
 
         enviadas++;
 
         // ====================================================
-        // ADICIONAR AO RELATÓRIO
+        // RELATÓRIO
         // ====================================================
 
         relatorios.push({
@@ -400,10 +499,7 @@ exports.handler = async () => {
             notificacao.clienteRazaoSocial ||
             "Não informado",
 
-          codigoCliente:
-            notificacao.codigoCliente ||
-            notificacao.pessoaId ||
-            "Não informado",
+          codigoCliente: notificacao.pessoaId || "Não informado",
 
           telefone,
 
@@ -423,13 +519,9 @@ exports.handler = async () => {
           typeof erro === "string" ? erro : JSON.stringify(erro);
 
         console.error(
-          `❌ Erro ao enviar WhatsApp para cliente ${notificacao.codigoCliente}:`,
+          `❌ Erro ao enviar WhatsApp para cliente ${notificacao.pessoaId}:`,
           erroTexto,
         );
-
-        // ====================================================
-        // MARCAR COMO ERRO
-        // ====================================================
 
         await doc.ref.update({
           status: "erro",
@@ -441,20 +533,13 @@ exports.handler = async () => {
 
         erros++;
 
-        // ====================================================
-        // ADICIONAR AO RELATÓRIO
-        // ====================================================
-
         relatorios.push({
           clienteNome:
             notificacao.clienteNome ||
             notificacao.clienteRazaoSocial ||
             "Não informado",
 
-          codigoCliente:
-            notificacao.codigoCliente ||
-            notificacao.pessoaId ||
-            "Não informado",
+          codigoCliente: notificacao.pessoaId || "Não informado",
 
           telefone,
 
@@ -474,6 +559,8 @@ exports.handler = async () => {
     const telefoneAdmin = normalizarTelefoneCompleto(
       process.env.ZAPI_ADMIN_PHONE,
     );
+
+    let relatorioEnviado = false;
 
     if (!telefoneAdmin) {
       console.warn("⚠️ ZAPI_ADMIN_PHONE não configurada ou inválida.");
@@ -499,10 +586,11 @@ exports.handler = async () => {
         console.log("✅ Relatório administrativo enviado.");
 
         console.log(`🆔 ID relatório Z-API: ${resultadoAdmin.messageId}`);
+
+        relatorioEnviado = true;
       } catch (error) {
         console.error(
           "❌ Erro ao enviar relatório administrativo:",
-
           error.response?.data || error.message,
         );
       }
@@ -531,12 +619,10 @@ exports.handler = async () => {
         pendentes: snapshot.size,
 
         enviadas,
-
         erros,
-
         semTelefone,
 
-        relatorioEnviado: Boolean(telefoneAdmin),
+        relatorioEnviado,
       }),
     };
   } catch (error) {
@@ -551,7 +637,6 @@ exports.handler = async () => {
 
       body: JSON.stringify({
         sucesso: false,
-
         erro: error.message,
       }),
     };

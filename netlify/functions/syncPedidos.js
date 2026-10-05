@@ -1,7 +1,9 @@
 const axios = require("axios");
+
 const admin = require("./firebaseAdmin");
 
 const db = admin.firestore();
+
 const { FieldValue } = admin.firestore;
 
 exports.handler = async () => {
@@ -9,6 +11,7 @@ exports.handler = async () => {
     console.log("🔄 Iniciando sincronização de pedidos...");
 
     const response = await axios.get(process.env.COSMOS_PEDIDOS_URL);
+
     const pedidos = response.data;
 
     if (!Array.isArray(pedidos)) {
@@ -47,6 +50,7 @@ exports.handler = async () => {
       if (!pedido.PedidoId) continue;
 
       const id = String(pedido.PedidoId);
+
       const existente = pedidosExistentes.get(id);
 
       const dados = {
@@ -56,6 +60,10 @@ exports.handler = async () => {
         numeroSolicitacao: pedido.PedidoNroSolic || "",
         valorTotal: Number(pedido.PedidoVlTotal || 0),
         situacao: pedido.PedidoSituacao || "",
+
+        // Novos dados do Cosmos
+        dataPedido: pedido.PedidoData || null,
+        dataEntrega: pedido.PedidoDataEntrega || null,
       };
 
       // PEDIDO NOVO
@@ -79,7 +87,9 @@ exports.handler = async () => {
           existente.pessoaId !== dados.pessoaId ||
           existente.numeroSolicitacao !== dados.numeroSolicitacao ||
           existente.valorTotal !== dados.valorTotal ||
-          existente.situacao !== dados.situacao;
+          existente.situacao !== dados.situacao ||
+          existente.dataPedido !== dados.dataPedido ||
+          existente.dataEntrega !== dados.dataEntrega;
 
         if (!mudou) {
           semAlteracao++;
