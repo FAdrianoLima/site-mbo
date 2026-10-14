@@ -560,7 +560,11 @@ exports.handler = async () => {
     // RELATÓRIO ADMINISTRATIVO
     // ========================================================
 
-    const telefoneAdmin = normalizarTelefoneCompleto(
+    {
+      /*
+  um numero:
+
+     const telefoneAdmin = normalizarTelefoneCompleto(
       process.env.ZAPI_ADMIN_PHONE,
     );
 
@@ -599,6 +603,69 @@ exports.handler = async () => {
         );
       }
     }
+
+
+  */
+    }
+
+    // ========================================================
+    // RELATÓRIO ADMINISTRATIVO — DOIS NÚMEROS
+    // ========================================================
+
+    const telefonesAdmin = [
+      process.env.ZAPI_ADMIN_PHONE,
+      process.env.ZAPI_ADMIN_PHONE_2,
+    ]
+      .map((telefone) => normalizarTelefoneCompleto(telefone))
+      .filter(
+        (telefone, index, lista) =>
+          telefone && lista.indexOf(telefone) === index,
+      );
+
+    let relatorioEnviado = false;
+    let relatoriosEnviados = 0;
+
+    if (telefonesAdmin.length === 0) {
+      console.warn("⚠️ Nenhum telefone administrativo configurado.");
+    } else {
+      const relatorio = montarRelatorioExecucao({
+        total: snapshot.size,
+        enviadas,
+        erros,
+        semTelefone,
+        relatorios,
+      });
+
+      for (const telefoneAdmin of telefonesAdmin) {
+        try {
+          console.log(
+            `📊 Enviando relatório administrativo para ${telefoneAdmin}...`,
+          );
+
+          const resultadoAdmin = await enviarMensagemZApi(
+            telefoneAdmin,
+            relatorio,
+          );
+
+          console.log(
+            `✅ Relatório enviado para ${telefoneAdmin}. ID: ${resultadoAdmin.messageId}`,
+          );
+
+          relatoriosEnviados++;
+        } catch (error) {
+          console.error(
+            `❌ Erro ao enviar relatório para ${telefoneAdmin}:`,
+            error.response?.data || error.message,
+          );
+        }
+      }
+
+      relatorioEnviado = relatoriosEnviados > 0;
+    }
+
+    // ========================================================
+    // FIM DO RELATÓRIO ADMINISTRATIVO
+    // ========================================================
 
     // ========================================================
     // FINALIZAÇÃO
