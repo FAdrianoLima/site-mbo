@@ -131,9 +131,14 @@ Temos uma atualização sobre o seu pedido.
   for (const item of itens) {
     const codigoPedido = item.codigoPedido || item.pedidoId || "não informado";
 
+    const status =
+      item.macroStatus === "disponivel_entrega"
+        ? "Seu pedido está disponível para coleta."
+        : textoStatus(item.macroStatus);
+
     mensagem += `Pedido: ${codigoPedido}
 
-${textoStatus(item.macroStatus)}
+${status}
 
 `;
 
@@ -153,7 +158,6 @@ Em caso de dúvidas, entre em contato pelo número:
 
   return mensagem.trim();
 }
-
 // ============================================================
 // Z-API
 // ============================================================
